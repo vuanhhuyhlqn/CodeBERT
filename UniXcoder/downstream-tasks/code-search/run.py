@@ -44,14 +44,12 @@ class InputFeatures(object):
                  nl_tokens,
                  nl_ids,
                  url,
-
     ):
         self.code_tokens = code_tokens
         self.code_ids = code_ids
         self.nl_tokens = nl_tokens
         self.nl_ids = nl_ids
         self.url = url
-
         
 def convert_examples_to_features(js,tokenizer,args):
     """convert examples to token ids"""
@@ -113,7 +111,6 @@ class TextDataset(Dataset):
 
     def __getitem__(self, i):   
         return (torch.tensor(self.examples[i].code_ids),torch.tensor(self.examples[i].nl_ids))
-            
 
 def set_seed(seed=42):
     random.seed(seed)
@@ -122,7 +119,6 @@ def set_seed(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
-
 
 def train(args, model, tokenizer):
     """ Train the model """
@@ -150,7 +146,7 @@ def train(args, model, tokenizer):
     model.train()
     tr_num,tr_loss,best_mrr = 0,0,0 
     for idx in range(args.num_train_epochs): 
-        for step,batch in enumerate(train_dataloader):
+        for step, batch in enumerate(train_dataloader):
             #get inputs
             code_inputs = batch[0].to(args.device)    
             nl_inputs = batch[1].to(args.device)
@@ -159,7 +155,7 @@ def train(args, model, tokenizer):
             nl_vec = model(nl_inputs=nl_inputs)
             
             #calculate scores and loss
-            scores = torch.einsum("ab,cb->ac",nl_vec,code_vec)
+            scores = torch.einsum("ab,cb->ac", nl_vec, code_vec)
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(scores*20, torch.arange(code_inputs.size(0), device=scores.device))
             
