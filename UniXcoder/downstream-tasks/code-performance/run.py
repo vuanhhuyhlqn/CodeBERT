@@ -67,3 +67,12 @@ class TextDataset(Dataset):
 	
 	def __getitem__(self, i):
 		return (torch.tensor(self.examples[i].code_ids), self.examples[i].code_perf)
+	
+def train(args, model, tokenizer):
+	pass
+
+def main():
+	pass
+
+if __name__ == "__main__":
+	main()

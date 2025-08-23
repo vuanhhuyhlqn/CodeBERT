@@ -30,11 +30,11 @@ import numpy as np
 from model import Model
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
-from transformers import (WEIGHTS_NAME, AdamW, get_linear_schedule_with_warmup,
+from torch.optim import AdamW
+from transformers import (WEIGHTS_NAME, get_linear_schedule_with_warmup,
                               RobertaConfig, RobertaModel, RobertaTokenizer)
 
 logger = logging.getLogger(__name__)
-
 
 class InputFeatures(object):
     """A single training/test features for a example."""
@@ -51,7 +51,7 @@ class InputFeatures(object):
         self.nl_ids = nl_ids
         self.url = url
         
-def convert_examples_to_features(js,tokenizer,args):
+def convert_examples_to_features(js, tokenizer, args):
     """convert examples to token ids"""
     code = ' '.join(js['code_tokens']) if type(js['code_tokens']) is list else ' '.join(js['code_tokens'].split())
     code_tokens = tokenizer.tokenize(code)[:args.code_length-4]
