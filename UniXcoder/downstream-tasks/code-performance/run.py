@@ -8,14 +8,18 @@ import pickle
 import random
 import torch
 import json
-import numpy as np
+from tqdm import tqdm
 from model import Model
+import numpy as np
 from loss import PerformanceMetricLoss
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
 from torch.optim import AdamW
 from transformers import (WEIGHTS_NAME, get_linear_schedule_with_warmup,
 							  RobertaConfig, RobertaModel, RobertaTokenizer)
+import sklearn
+from sklearn.neighbors import KNeighborsRegressor
+from scipy.stats import kendalltau
 
 logger = logging.getLogger(__name__)
 
@@ -124,14 +128,69 @@ def train(args, model: Model, tokenizer):
 			optimizer.zero_grad()
 			scheduler.step() 
 
+	evaluate(args, model, tokenizer)
+
+def evaluate(args, model: Model, tokenizer):
+	eval_dataset = TextDataset(tokenizer, args, args.test_data_file)
+	eval_sampler = RandomSampler(eval_dataset)
+	eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size, num_workers=4)
+
+	model.eval()
+
+	code_vecs = []
+	code_perfs = []
+
+	for batch in eval_dataloader:
+		code_inputs = batch[0].to(args.device)
+		code_perf = batch[1].to(args.device)
+		with torch.no_grad():
+			code_vec = model(code_inputs=code_inputs)
+			code_vecs.append(code_vec.cpu().numpy())
+			code_perfs.append(code_perf.cpu().numpy())
+	
+	model.train()
+
+	code_vecs = np.concatenate(code_vecs, 0)
+	code_perfs = np.concatenate(code_perfs, 0)
+
+	X = code_vecs.copy()
+	Y = code_perfs.copy()
+
+	avg_score = 0
+	num_test = 5
+	test_size = 50
+	for i in tqdm(range(num_test)):
+		Xs, Ys = sklearn.utils.shuffle(X, Y)
+		
+		x_test = Xs[:test_size]
+		y_test = Ys[:test_size]
+
+		x_train = Xs[test_size:]
+		y_train = Ys[test_size:]
+
+		knn = KNeighborsRegressor(n_neighbors=5)
+		knn.fit(x_train, y_train)
+
+		y_pred = knn.predict(x_test)
+
+		def rank(values):
+			return np.argsort(np.argsort(values))
+		
+		true_rank = rank(y_test)
+		pred_rank = rank(y_pred)
+
+		tau, p_value = kendalltau(true_rank, pred_rank)
+		avg_score += tau
+	avg_score /= num_test
+	print(f'[*] Average Score: {avg_score}')
 
 def main():
 	parser = argparse.ArgumentParser()
 	
 	## Required parameters
 	parser.add_argument("--train_data_file", default=None, type=str, help="The input training data file(a .jsonl file)")
-	parser.add_argument("--output_dir", default=None, type=str, required=True, help="The output directory where the model predictions and checkpoints will be written.")
 	parser.add_argument("--test_data_file", default=None, type=str, help="An optional input test data file to test the model(a jsonl file).")
+	parser.add_argument("--output_dir", default=None, type=str, required=True, help="The output directory where the model predictions and checkpoints will be written.")
 	parser.add_argument("--model_name_or_path", default=None, type=str, help="The model checkpoint for weights initialization.")
 	parser.add_argument("--do_train", action='store_true', help="Whether to run training.")
 	parser.add_argument("--do_eval", action='store_true', help="Whether to run eval on the dev set.")
@@ -169,9 +228,7 @@ def main():
 		train(args, model, tokenizer)
 	
 	if args.do_eval:
-		pass
-
-
+		evaluate(args, model, tokenizer)
 
 if __name__ == "__main__":
 	main()
