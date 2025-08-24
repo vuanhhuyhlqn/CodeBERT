@@ -128,8 +128,6 @@ def train(args, model: Model, tokenizer):
 			optimizer.zero_grad()
 			scheduler.step() 
 
-	evaluate(args, model, tokenizer)
-
 def evaluate(args, model: Model, tokenizer):
 	eval_dataset = TextDataset(tokenizer, args, args.test_data_file)
 	eval_sampler = RandomSampler(eval_dataset)
