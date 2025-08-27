@@ -90,7 +90,7 @@ def train(args, model: Model, tokenizer):
 
 	#get optimizer and scheduler
 	optimizer = AdamW(model.parameters(), lr=args.learning_rate, eps=1e-8)
-	scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps = 0, num_training_steps = len(train_dataloader) * args.num_train_epochs)
+	scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps = int(0.1 * len(train_dataloader)*args.num_train_epochs), num_training_steps = len(train_dataloader) * args.num_train_epochs)
 	
 	# Train!
 	logger.info("***** Running training *****")
@@ -107,26 +107,28 @@ def train(args, model: Model, tokenizer):
 	for idx in range(args.num_train_epochs):
 		for step, batch in enumerate(train_dataloader):
 			code_inputs = batch[0].to(args.device)
-			code_perfs = batch[1].to(args.device)
+			true_perfs = batch[1].float().to(args.device)
 
-			code_vec = model(code_inputs=code_inputs)
+			pred_perfs = model(code_inputs=code_inputs)
 
-			loss_fct = PerformanceMetricLoss()
-			loss = loss_fct(code_vec, code_perfs)
+			loss_fct = MSELoss()
+			loss = loss_fct(pred_perfs, true_perfs)
 
 			tr_loss += loss.item()
 			tr_num += 1
 
-			if (step + 1) % 10 == 0:
+			if (step + 1) % 3 == 0:
 				logger.info("epoch {} step {} loss {}".format(idx, step + 1, round(tr_loss / tr_num, 5)))
 				tr_num = 0
 				tr_loss = 0
 			
 			loss.backward()
-			torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+			# torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 			optimizer.step()
 			optimizer.zero_grad()
 			scheduler.step() 
+
+		evaluate(args, model, tokenizer)
 
 def evaluate(args, model: Model, tokenizer):
 	eval_dataset = TextDataset(tokenizer, args, args.test_data_file)
@@ -135,52 +137,34 @@ def evaluate(args, model: Model, tokenizer):
 
 	model.eval()
 
-	code_vecs = []
-	code_perfs = []
+	pred_perfs = []
+	true_perfs = []
 
 	for batch in eval_dataloader:
 		code_inputs = batch[0].to(args.device)
-		code_perf = batch[1].to(args.device)
+		true_perf = batch[1].float().to(args.device)
 		with torch.no_grad():
-			code_vec = model(code_inputs=code_inputs)
-			code_vecs.append(code_vec.cpu().numpy())
-			code_perfs.append(code_perf.cpu().numpy())
+			pred_perf = model(code_inputs=code_inputs)
+			pred_perfs.append(pred_perf.cpu().numpy())
+
+			true_perfs.append(true_perf.cpu().numpy())
+
+	pred_perfs = np.concatenate(pred_perfs, 0)
+	true_perfs = np.concatenate(true_perfs, 0)
+
+	mse = ((pred_perfs - true_perfs) ** 2).mean()
+	logger.info(f"MSE on eval: {mse}")
+
+	def rank(values):
+		return np.argsort(np.argsort(values))
 	
+	true_rank = rank(true_perfs)
+	pred_rank = rank(pred_perfs)
+
+	tau, p_value = kendalltau(true_rank, pred_rank)
+	logger.info(f"Kendall Tau: {tau}")
+
 	model.train()
-
-	code_vecs = np.concatenate(code_vecs, 0)
-	code_perfs = np.concatenate(code_perfs, 0)
-
-	X = code_vecs.copy()
-	Y = code_perfs.copy()
-
-	avg_score = 0
-	num_test = 5
-	test_size = 50
-	for i in tqdm(range(num_test)):
-		Xs, Ys = sklearn.utils.shuffle(X, Y)
-		
-		x_test = Xs[:test_size]
-		y_test = Ys[:test_size]
-
-		x_train = Xs[test_size:]
-		y_train = Ys[test_size:]
-
-		knn = KNeighborsRegressor(n_neighbors=5)
-		knn.fit(x_train, y_train)
-
-		y_pred = knn.predict(x_test)
-
-		def rank(values):
-			return np.argsort(np.argsort(values))
-		
-		true_rank = rank(y_test)
-		pred_rank = rank(y_pred)
-
-		tau, p_value = kendalltau(true_rank, pred_rank)
-		avg_score += tau
-	avg_score /= num_test
-	print(f'[*] Average Score: {avg_score}')
 
 def main():
 	parser = argparse.ArgumentParser()
@@ -195,7 +179,7 @@ def main():
 	parser.add_argument("--do_test", action='store_true', help="Whether to run eval on the test set.")  
 	parser.add_argument("--train_batch_size", default=4, type=int, help="Batch size for training.")
 	parser.add_argument("--eval_batch_size", default=4, type=int, help="Batch size for evaluation.")
-	parser.add_argument("--learning_rate", default=5e-5, type=float, help="The initial learning rate for Adam.")
+	parser.add_argument("--learning_rate", default=2e-3, type=float, help="The initial learning rate for Adam.")
 	parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
 	parser.add_argument("--num_train_epochs", default=1, type=int, help="Total number of training epochs to perform.")
 	parser.add_argument("--code_length", default=256, type=int, help="Optional Code input sequence length after tokenization.") 
@@ -225,8 +209,8 @@ def main():
 	if args.do_train:
 		train(args, model, tokenizer)
 	
-	if args.do_eval:
-		evaluate(args, model, tokenizer)
+	# if args.do_eval:
+	# 	evaluate(args, model, tokenizer)
 
 if __name__ == "__main__":
 	main()
