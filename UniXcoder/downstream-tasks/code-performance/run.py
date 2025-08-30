@@ -8,6 +8,7 @@ import pickle
 import random
 import torch
 import json
+import math
 from tqdm import tqdm
 from model import Model
 import numpy as np
@@ -42,7 +43,7 @@ def convert_examples_to_features(js, tokenizer, args):
 	code_ids = tokenizer.convert_tokens_to_ids(code_tokens)
 	padding_length = args.code_length - len(code_ids)
 	code_ids += [tokenizer.pad_token_id]*padding_length
-	code_perf = js['code_perf']
+	code_perf = math.log(js['code_perf'])
 	return InputFeatures(code_tokens, code_ids, code_perf)
 
 class TextDataset(Dataset):
@@ -117,7 +118,7 @@ def train(args, model: Model, tokenizer):
 			tr_loss += loss.item()
 			tr_num += 1
 
-			if (step + 1) % 3 == 0:
+			if (step + 1) % 10 == 0:
 				logger.info("epoch {} step {} loss {}".format(idx, step + 1, round(tr_loss / tr_num, 5)))
 				tr_num = 0
 				tr_loss = 0
@@ -179,7 +180,7 @@ def main():
 	parser.add_argument("--do_test", action='store_true', help="Whether to run eval on the test set.")  
 	parser.add_argument("--train_batch_size", default=4, type=int, help="Batch size for training.")
 	parser.add_argument("--eval_batch_size", default=4, type=int, help="Batch size for evaluation.")
-	parser.add_argument("--learning_rate", default=2e-3, type=float, help="The initial learning rate for Adam.")
+	parser.add_argument("--learning_rate", default=1e-3, type=float, help="The initial learning rate for Adam.")
 	parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
 	parser.add_argument("--num_train_epochs", default=1, type=int, help="Total number of training epochs to perform.")
 	parser.add_argument("--code_length", default=256, type=int, help="Optional Code input sequence length after tokenization.") 
