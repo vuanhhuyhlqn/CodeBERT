@@ -43,7 +43,7 @@ def convert_examples_to_features(js, tokenizer, args):
 	code_ids = tokenizer.convert_tokens_to_ids(code_tokens)
 	padding_length = args.code_length - len(code_ids)
 	code_ids += [tokenizer.pad_token_id]*padding_length
-	code_perf = math.log(js['code_perf'])
+	code_perf = js['code_perf']
 	return InputFeatures(code_tokens, code_ids, code_perf)
 
 class TextDataset(Dataset):
@@ -90,7 +90,7 @@ def set_seed(seed=42):
 def train(args, model: Model, tokenizer):
 	""" Train the model """
 	#get training dataset
-	train_dataset = TextDataset(tokenizer, args, num_samples=1024, sample_size=10, file_path=args.train_data_file)
+	train_dataset = TextDataset(tokenizer, args, num_samples=5000, sample_size=10, file_path=args.train_data_file)
 	train_sampler = RandomSampler(train_dataset)
 	train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size, num_workers=4)
 
@@ -129,7 +129,7 @@ def train(args, model: Model, tokenizer):
 			tr_loss += loss.item()
 			tr_num += 1
 
-			if (step + 1) % 5 == 0:
+			if (step + 1) % 10 == 0:
 				logger.info("epoch {} step {} loss {}".format(idx, step + 1, round(tr_loss / tr_num, 5)))
 				tr_num = 0
 				tr_loss = 0
