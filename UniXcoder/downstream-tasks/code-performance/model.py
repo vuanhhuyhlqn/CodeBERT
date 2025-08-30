@@ -11,10 +11,7 @@ class Model(nn.Module):
             nn.Linear(768, 256),
             nn.BatchNorm1d(256), 
             nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),     
-            nn.ReLU(),
-            nn.Linear(128, 64),
+            nn.Linear(256, 64),
             nn.BatchNorm1d(64),     
             nn.ReLU(),
             nn.Linear(64, 1)

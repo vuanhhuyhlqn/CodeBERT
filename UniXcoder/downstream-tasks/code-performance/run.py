@@ -12,7 +12,7 @@ import math
 from tqdm import tqdm
 from model import Model
 import numpy as np
-from loss import PerformanceMetricLoss
+from loss import ListNetLoss
 from torch.nn import CrossEntropyLoss, MSELoss
 from torch.utils.data import DataLoader, Dataset, SequentialSampler, RandomSampler,TensorDataset
 from torch.optim import AdamW
@@ -47,8 +47,10 @@ def convert_examples_to_features(js, tokenizer, args):
 	return InputFeatures(code_tokens, code_ids, code_perf)
 
 class TextDataset(Dataset):
-	def __init__(self, tokenizer, args, file_path=None):
+	def __init__(self, tokenizer, args, num_samples=None, sample_size=None, file_path=None):
 		self.examples = []
+		self.num_samples = num_samples
+		self.sample_size = sample_size
 		data = []
 		with open(file_path) as f:
 			if "jsonl" in file_path:
@@ -69,10 +71,13 @@ class TextDataset(Dataset):
 				logger.info("code_perf: {}".format(example.code_perf))
 	
 	def __len__(self):
-		return len(self.examples)
+		return self.num_samples
 	
-	def __getitem__(self, i):
-		return (torch.tensor(self.examples[i].code_ids), self.examples[i].code_perf)
+	def __getitem__(self, idx):
+		indices = random.sample(range(len(self.examples)), self.sample_size)
+		code_ids = [self.examples[i].code_ids for i in indices]
+		code_perfs = [self.examples[i].code_perf for i in indices]
+		return (torch.tensor(code_ids), torch.tensor(code_perfs))
 
 def set_seed(seed=42):
 	random.seed(seed)
@@ -85,7 +90,7 @@ def set_seed(seed=42):
 def train(args, model: Model, tokenizer):
 	""" Train the model """
 	#get training dataset
-	train_dataset = TextDataset(tokenizer, args, args.train_data_file)
+	train_dataset = TextDataset(tokenizer, args, num_samples=1024, sample_size=10, file_path=args.train_data_file)
 	train_sampler = RandomSampler(train_dataset)
 	train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size, num_workers=4)
 
@@ -107,18 +112,24 @@ def train(args, model: Model, tokenizer):
 	tr_num, tr_loss = 0, 0 
 	for idx in range(args.num_train_epochs):
 		for step, batch in enumerate(train_dataloader):
-			code_inputs = batch[0].to(args.device)
-			true_perfs = batch[1].float().to(args.device)
+			lst_code_inputs = batch[0].to(args.device)
+			lst_true_perfs = batch[1].float().to(args.device)
+			
+			all_losses = []
 
-			pred_perfs = model(code_inputs=code_inputs)
+			for code_inputs, true_perfs in zip(lst_code_inputs, lst_true_perfs):
+				pred_perfs = model(code_inputs=code_inputs)
+				
+				loss_fct = ListNetLoss()
+				loss = loss_fct(pred_perfs, true_perfs)
 
-			loss_fct = MSELoss()
-			loss = loss_fct(pred_perfs, true_perfs)
+				all_losses.append(loss)
 
+			loss = torch.stack(all_losses).mean()
 			tr_loss += loss.item()
 			tr_num += 1
 
-			if (step + 1) % 10 == 0:
+			if (step + 1) % 5 == 0:
 				logger.info("epoch {} step {} loss {}".format(idx, step + 1, round(tr_loss / tr_num, 5)))
 				tr_num = 0
 				tr_loss = 0
@@ -132,38 +143,38 @@ def train(args, model: Model, tokenizer):
 		evaluate(args, model, tokenizer)
 
 def evaluate(args, model: Model, tokenizer):
-	eval_dataset = TextDataset(tokenizer, args, args.test_data_file)
+	eval_dataset = TextDataset(tokenizer, args, num_samples=128, sample_size=10, file_path=args.test_data_file)
 	eval_sampler = RandomSampler(eval_dataset)
 	eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size, num_workers=4)
 
 	model.eval()
 
-	pred_perfs = []
-	true_perfs = []
-
-	for batch in eval_dataloader:
-		code_inputs = batch[0].to(args.device)
-		true_perf = batch[1].float().to(args.device)
-		with torch.no_grad():
-			pred_perf = model(code_inputs=code_inputs)
-			pred_perfs.append(pred_perf.cpu().numpy())
-
-			true_perfs.append(true_perf.cpu().numpy())
-
-	pred_perfs = np.concatenate(pred_perfs, 0)
-	true_perfs = np.concatenate(true_perfs, 0)
-
-	mse = ((pred_perfs - true_perfs) ** 2).mean()
-	logger.info(f"MSE on eval: {mse}")
-
 	def rank(values):
 		return np.argsort(np.argsort(values))
-	
-	true_rank = rank(true_perfs)
-	pred_rank = rank(pred_perfs)
 
-	tau, p_value = kendalltau(true_rank, pred_rank)
-	logger.info(f"Kendall Tau: {tau}")
+	avg_tau = 0
+	eval_num = 0
+
+	for batch in eval_dataloader:
+		lst_code_inputs = batch[0].to(args.device)
+		lst_true_perfs = batch[1].float().to(args.device)
+
+		for code_inputs, true_perfs in zip(lst_code_inputs, lst_true_perfs):
+			with torch.no_grad():
+				pred_perfs = model(code_inputs=code_inputs)
+
+				pred_p = pred_perfs.cpu().numpy()
+				true_p = true_perfs.cpu().numpy()
+
+				true_rank = rank(true_p)
+				pred_rank = rank(pred_p)
+
+				tau, p_value = kendalltau(true_rank, pred_rank)
+
+				avg_tau += tau
+				eval_num += 1
+
+	logger.info(f"Kendall Tau: {avg_tau / eval_num}")
 
 	model.train()
 
